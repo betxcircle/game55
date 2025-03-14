@@ -280,6 +280,11 @@ socket.on('choice', async (data) => {
 
             // After determining the winner, update the winner's balance
             const winnerUserId = overallWinnerMessage.includes('Player 1') ? rooms[roomID].players[0].userId : rooms[roomID].players[1].userId;
+           
+            const loserUserId = overallWinnerMessage.includes('Player 1') 
+  ? rooms[roomID].players[1].userId 
+  : rooms[roomID].players[0].userId;
+            
             const totalBet = rooms[roomID].totalBet || 0;
 
             try {
@@ -305,10 +310,22 @@ socket.on('choice', async (data) => {
               } else {
                 console.log('Winner user not found');
               }
-            } catch (error) {
-              console.error('Error updating winner balance or saving to database:', error.message);
+            }    
+            if (loserUserId) {
+            const loserUser = await OdinCircledbModel.findById(loserUserId);
+            if (loserUser) {
+              const newLoser = new LoserModel({
+                roomId: roomID,
+                loserName: loserUser._id,
+                totalBetLost: totalBet,
+              });
+              await newLoser.save();
+              console.log('Loser saved to database:', newLoser);
             }
-
+          }
+        } catch (error) {
+          console.error('Error updating winner/loser balance or saving to database:', error.message);
+        }
             // Clear room data if no longer needed
             delete rooms[roomID];
           }
