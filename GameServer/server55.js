@@ -2,6 +2,7 @@ const socketIO = require('socket.io');
 const OdinCircledbModel = require('../models/odincircledb');
 const BetModel = require('../models/BetModel');
 const WinnerModel = require('../models/WinnerModel');
+const LoserModel = require('../models/LoserModel'); // Import LoserModel
 const BetModelRock = require('../models/BetModelRock');
 const BetCashModel = require('../models/BetCashModel');
 const Device = require('../models/Device');
@@ -427,8 +428,9 @@ socket.on('placeBet', async ({ roomId, userId, playerNumber, betAmount }) => {
 
 
 
- // Handle socket disconnection
- socket.on('disconnect', async () => {
+ 
+// Handle socket disconnection
+socket.on('disconnect', async () => {
   console.log('A user disconnected:', socket.id);
 
   // Iterate through the rooms to find the disconnected player's room
@@ -458,14 +460,46 @@ socket.on('placeBet', async ({ roomId, userId, playerNumber, betAmount }) => {
         } catch (error) {
           console.error(`Error deleting room ${roomId} from BetModelRock in the database:`, error.message);
         }
-      } else {
-        io.to(roomId).emit('opponentLeft', `${disconnectedPlayer.name} has left the game. Waiting for a new player...`);
-        room.choices = {}; // Reset choices if a player leaves mid-game
+      } else if (room.players.length === 1) {
+        // If one player remains, determine if they should be declared the winner
+        const remainingPlayer = room.players[0];
+
+        // Use determineOverallWinner to check if a winner was already decided
+        const result = determineOverallWinner(roomId);
+        
+        if (!result.includes("tie") && !result.includes("winner")) {
+          console.log(`${remainingPlayer.name} is the default winner due to opponent disconnection.`);
+          io.to(roomId).emit('gameOver', { 
+            roomId, 
+            message: `${remainingPlayer.name} wins by default as opponent disconnected.`,
+            winner: remainingPlayer.name 
+          });
+
+          // Save the winner in WinnerModel
+          try {
+            const newWinner = new WinnerModel({
+              roomId,
+              winnerName: remainingPlayer._id, 
+              totalBet: room.totalBet || 0
+            });
+            await newWinner.save();
+            console.log(`Winner saved to database: ${remainingPlayer.name}`);
+          } catch (error) {
+            console.error(`Error saving winner to database:`, error.message);
+          }
+
+          // Delete room after declaring the winner
+          delete rooms[roomId];
+        } else {
+          io.to(roomId).emit('opponentLeft', `${disconnectedPlayer.name} has left the game. Waiting for a new player...`);
+          room.choices = {}; // Reset choices if a player leaves mid-game
+        }
       }
       break;
     }
   }
 });
+
 
 
 const determineRoundWinner = (roomID) => {
